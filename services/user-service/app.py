@@ -1,61 +1,78 @@
-import logging
-import os
+import logging, os, requests, time, json
 from flask import Flask, jsonify
-import requests
-from pythonjsonlogger import jsonlogger
 from opentelemetry import trace
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
-# --- 1. ACTUAL LOGGING TO FILE ---
-# This creates the physical file with Trace IDs required by the professor
-log_dir = "/logs"
-os.makedirs(log_dir, exist_ok=True)
-service_name = os.getenv('SERVICE_NAME', 'service')
-logger = logging.getLogger()
-log_handler = logging.FileHandler(f"{log_dir}/{service_name}.log")
+SERVICE_NAME = "user-service"             # Change this for each file
+NEXT_SERVICE_URL = "http://127.0.0.1:5003/process" # Change this for each file
+PORT = 5002  
 
-# Formatter automatically injects trace_id and span_id into every log line
-formatter = jsonlogger.JsonFormatter('%(asctime)s %(levelname)s %(message)s %(trace_id)s %(span_id)s')
-log_handler.setFormatter(formatter)
-logger.addHandler(log_handler)
-logger.setLevel(logging.INFO)
+# ==========================================
+# STEP 2: DIRECT-TO-DISK LOGGING (FAILSAFE)
+# ==========================================
+LOG_DIR = r"C:\Anomaly_Logs"
+if not os.path.exists(LOG_DIR):
+    os.makedirs(LOG_DIR, exist_ok=True)
 
-# --- 2. OPENTELEMETRY SETUP ---
-resource = Resource(attributes={"service.name": service_name})
+log_path = os.path.join(LOG_DIR, f"{SERVICE_NAME}.log")
+
+def write_failsafe_log(t_id, latency):
+    """Bypasses standard logging to ensure data is written to disk instantly."""
+    log_entry = {
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "service": SERVICE_NAME,
+        "trace_id": t_id,
+        "latency_ms": latency,
+        "status": "success"
+    }
+    with open(log_path, "a") as f:
+        f.write(json.dumps(log_entry) + "\n")
+
+# ==========================================
+# STEP 3: OPENTELEMETRY SETUP
+# ==========================================
+resource = Resource(attributes={"service.name": SERVICE_NAME})
 provider = TracerProvider(resource=resource)
-otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
-processor = BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint))
-provider.add_span_processor(processor)
+# Sends data to Jaeger immediately
+provider.add_span_processor(SimpleSpanProcessor(OTLPSpanExporter(endpoint="http://localhost:4317")))
 trace.set_tracer_provider(provider)
 
 app = Flask(__name__)
-# FlaskInstrumentor tracks incoming requests
 FlaskInstrumentor().instrument_app(app)
-# RequestsInstrumentor ensures Trace IDs are passed to the next service (Fixes Jaeger) 
 RequestsInstrumentor().instrument()
 
+# ==========================================
+# STEP 4: MAIN ROUTE
+# ==========================================
 @app.route("/process")
 def process():
+    start_time = time.time()
+    
+    # Extract Trace ID
     current_span = trace.get_current_span()
     t_id = format(current_span.get_span_context().trace_id, '032x')
     
-    logger.info(f"{service_name} is processing", extra={'trace_id': t_id})
-    
-    # Example logic to call the next microservice in the chain
-    next_svc = os.getenv("NEXT_SERVICE")
-    if next_svc:
+    # Request Chaining
+    res_data = {"status": "end_of_chain"}
+    if NEXT_SERVICE_URL:
         try:
-            requests.get(f"http://{next_svc}:5000/process")
+            response = requests.get(NEXT_SERVICE_URL, timeout=3)
+            res_data = response.json()
         except Exception as e:
-            logger.error(f"Failed to call {next_svc}", extra={'trace_id': t_id})
+            res_data = {"error": f"Downstream service unavailable: {str(e)}"}
 
-    return jsonify({"status": "success", "service": service_name, "trace_id": t_id})
+    latency = round((time.time() - start_time) * 1000, 2)
+    
+    # --- WRITE LOG DIRECTLY TO FILE ---
+    write_failsafe_log(t_id, latency)
+    
+    return jsonify({"service": SERVICE_NAME, "trace_id": t_id, "next": res_data})
 
 if __name__ == "__main__":
-    # Ensure port matches your docker-compose mappings
-    app.run(host="0.0.0.0", port=5000)
+    print(f"--- {SERVICE_NAME} starting on port {PORT} ---")
+    app.run(host="127.0.0.1", port=PORT, threaded=True)

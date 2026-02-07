@@ -37,7 +37,7 @@ def throttled_audit(prompt, model="gemini-2.0-flash"):
 
 def run_large_audit():
     # 1. Automatically grab all 9 service logs from your folder
-    log_folder = r"C:\Users\nikit\OneDrive\Desktop\Anomaly -1\logs\*.log"
+    log_folder = r"C:\Anomaly_Logs\*.log"
     log_files = glob.glob(log_folder)
     
     if not log_files:
@@ -123,3 +123,7 @@ def run_large_audit():
 
 if __name__ == "__main__":
     run_large_audit()
+
+
+
+    
