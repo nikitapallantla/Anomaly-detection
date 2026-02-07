@@ -1,0 +1,12 @@
+flask
+requests
+pandas
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-instrumentation-flask
+opentelemetry-instrumentation-requests
+opentelemetry-exporter-otlp
+python-json-logger
+openai
+numpy
+prometheus-client
