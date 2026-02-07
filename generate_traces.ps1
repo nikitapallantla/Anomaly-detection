@@ -2,8 +2,8 @@
 # Multimodal Microservices Trace Generator with Anomalies
 # ===============================
 
-$iterations = 5
-$delay = 200 # milliseconds between requests
+$iterations = 150
+$delay = 10 # milliseconds between requests
 
 # -----------------------
 # Helper function: POST request with try/catch
