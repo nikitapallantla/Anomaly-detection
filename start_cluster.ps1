@@ -31,33 +31,40 @@
 
 # Write-Host "✅ All services are launching. Wait 15 seconds for them to warm up!" -ForegroundColor Green
 
-
-# ==========================================
-# Microservices Cluster Launcher (Final Fix)
-# ==========================================
-
 $env:OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317"
 $env:OTEL_TRACES_EXPORTER="otlp"
 
 Write-Host "🚀 Starting Microservices Cluster..." -ForegroundColor Cyan
 
-# Service Configuration List
+# Use absolute paths to be 100% sure
+$basePath = "C:\Users\nikit\OneDrive\Desktop\Anomaly-1"
+
+# The corrected service list (syntax fixed)
 $services = @(
     @{name="api-gateway"; path="services/api-gateway/app.py"},
     @{name="auth-service"; path="services/auth-service/app.py"},
+    @{name="user-service"; path="services/user-service/app.py"},
     @{name="transaction-service"; path="services/transaction-service/app.py"},
-    @{name="payment-service"; path="services/payment-service/app.py"},
-    @{name="notification-service"; path="services/notification-service/app.py"}
+    @{name="account-service"; path="services/account-service/app.py"},
+    @{name="fraud-service"; path="services/fraud-service/app.py"},
+    @{name="notification-service"; path="services/notification-service/app.py"},
+    @{name="audit-service"; path="services/audit-service/app.py"},
+    @{name="database-service"; path="services/database-service/app.py"}
 )
 
 foreach ($svc in $services) {
     $name = $svc.name
-    $path = $svc.path
-    # We use a single string with escaped quotes to ensure it travels to the new window correctly
-    $cmd = "Set-Location '$PWD'; `$env:OTEL_SERVICE_NAME='$name'; opentelemetry-instrument python $path"
+    $fullPath = "$basePath\$($svc.path)"
     
-    Start-Process powershell "-NoExit", "-Command", $cmd
-    Write-Host "Starting $name..." -ForegroundColor Yellow
+    if (Test-Path $fullPath) {
+        # We use just 'python' because your script already handles instrumentation
+        $cmd = "cd '$basePath'; python '$fullPath'"
+        Start-Process powershell -ArgumentList "-NoExit", "-Command", $cmd
+        Write-Host "✅ Launching $name..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 1 
+    } else {
+        Write-Host "❌ File Not Found: $fullPath" -ForegroundColor Red
+    }
 }
 
-Write-Host "✅ All windows opened. Check them for errors!" -ForegroundColor Green
+Write-Host "`n---`n✅ All 9 windows triggered!" -ForegroundColor Green

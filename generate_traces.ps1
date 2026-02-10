@@ -1,41 +1,18 @@
-# ==========================================
-# Corrected High-Speed Trace Generator 
-# ==========================================
+$iterations = 1500  # Set this to 1500 to get the full count
+Write-Host "🚀 Generating FULL CHAIN Traces (Gateway -> Database)..." -ForegroundColor Cyan
 
-$ProgressPreference = 'SilentlyContinue'
-$iterations = 150 
-$delay = 0 
-
-Write-Host "🚀 Generating Traces for Professor's Procedure..." -ForegroundColor Cyan
-
-# 1. API Gateway (Port 5000)
-Write-Host "Targeting Gateway on /process..."
-for ($i=0; $i -lt $iterations; $i++) {
-    $null = Invoke-RestMethod -Uri "http://127.0.0.1:5000/process" -Method GET -ErrorAction SilentlyContinue
-}
-
-# 2. Auth Service (Port 5001)
-Write-Host "Targeting Auth Service on /process..."
-for ($i=0; $i -lt $iterations; $i++) {
-    $null = Invoke-RestMethod -Uri "http://127.0.0.1:5001/process" -Method GET -ErrorAction SilentlyContinue
-}
-
-# 3. Transaction Service (Port 5003)
-Write-Host "Targeting Transaction Service on /process..."
-for ($i=0; $i -lt $iterations; $i++) {
-    $null = Invoke-RestMethod -Uri "http://127.0.0.1:5003/process" -Method GET -ErrorAction SilentlyContinue
-}
-
-# 4. Payment Service (Port 5004)
-Write-Host "Targeting Payment Service on /process..."
-for ($i=0; $i -lt $iterations; $i++) {
-    $null = Invoke-RestMethod -Uri "http://127.0.0.1:5004/process" -Method GET -ErrorAction SilentlyContinue
-}
-
-# 5. Notification Service (Port 5005)
-Write-Host "Targeting Notification Service on /process..."
-for ($i=0; $i -lt $iterations; $i++) {
-    $null = Invoke-RestMethod -Uri "http://127.0.0.1:5005/process" -Method GET -ErrorAction SilentlyContinue
+for ($i=1; $i -le $iterations; $i++) {
+    try {
+        # We ONLY hit port 5000. It triggers the rest!
+        $null = Invoke-RestMethod -Uri "http://127.0.0.1:5000/process" -Method GET -TimeoutSec 60
+        
+        if ($i % 10 -eq 0) {
+            Write-Host "✅ Progress: $i / $iterations traces completed." -ForegroundColor Green
+        }
+    }
+    catch {
+        Write-Host "⚠️ Trace $i timed out, but it's likely still processing in the background." -ForegroundColor Yellow
+    }
 }
 
 Write-Host "`n✅ Done! Check Jaeger: http://localhost:16686" -ForegroundColor Green

@@ -1,5 +1,10 @@
-import logging, os, requests, time, json
+import os
+import time
+import json
+import requests
+
 from flask import Flask, jsonify
+
 from opentelemetry import trace
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
@@ -7,72 +12,92 @@ from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExport
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 SERVICE_NAME = "user-service"             # Change this for each file
-NEXT_SERVICE_URL = "http://127.0.0.1:5003/process" # Change this for each file
+NEXT_SERVICE_URL = "http://transaction-service:5003/process" # Change this for each file
 PORT = 5002  
 
-# ==========================================
-# STEP 2: DIRECT-TO-DISK LOGGING (FAILSAFE)
-# ==========================================
-LOG_DIR = r"C:\Anomaly_Logs"
-if not os.path.exists(LOG_DIR):
-    os.makedirs(LOG_DIR, exist_ok=True)
+LOG_DIR = r"C:\Users\nikit\OneDrive\Desktop\Anomaly_Logs"
+os.makedirs(LOG_DIR, exist_ok=True)
 
 log_path = os.path.join(LOG_DIR, f"{SERVICE_NAME}.log")
 
-def write_failsafe_log(t_id, latency):
-    """Bypasses standard logging to ensure data is written to disk instantly."""
-    log_entry = {
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "service": SERVICE_NAME,
-        "trace_id": t_id,
-        "latency_ms": latency,
-        "status": "success"
-    }
-    with open(log_path, "a") as f:
-        f.write(json.dumps(log_entry) + "\n")
 
-# ==========================================
-# STEP 3: OPENTELEMETRY SETUP
-# ==========================================
+# def write_failsafe_log(trace_id, latency):
+#     log_entry = {
+#         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+#         "service": SERVICE_NAME,
+#         "trace_id": trace_id,
+#         "latency_ms": latency,
+#         "status": "success"
+#     }
+
+#     with open(log_path, "a", encoding="utf-8") as f:
+#         f.write(json.dumps(log_entry) + "\n")
+#         f.flush()
+
+#     print(f"✅ {SERVICE_NAME} LOG WRITTEN")
+
+
+# -------------------------------------------------------------------
+# 3. TRACING SETUP
+# -------------------------------------------------------------------
 resource = Resource(attributes={"service.name": SERVICE_NAME})
 provider = TracerProvider(resource=resource)
-# Sends data to Jaeger immediately
-provider.add_span_processor(SimpleSpanProcessor(OTLPSpanExporter(endpoint="http://localhost:4317")))
-trace.set_tracer_provider(provider)
+
+try:
+    processor = BatchSpanProcessor(
+        OTLPSpanExporter(endpoint="http://jaeger:4317")
+        )
+    provider.add_span_processor(processor)
+    trace.set_tracer_provider(provider)
+except Exception as e:
+    print("Tracing failed:", e)
+
 
 app = Flask(__name__)
 FlaskInstrumentor().instrument_app(app)
 RequestsInstrumentor().instrument()
 
-# ==========================================
-# STEP 4: MAIN ROUTE
-# ==========================================
+
+# -------------------------------------------------------------------
+# 4. ROUTE – THIS CALLS THE NEXT SERVICE (IF SET)
+# -------------------------------------------------------------------
 @app.route("/process")
 def process():
     start_time = time.time()
     
-    # Extract Trace ID
+    # Get Trace ID
     current_span = trace.get_current_span()
-    t_id = format(current_span.get_span_context().trace_id, '032x')
-    
-    # Request Chaining
-    res_data = {"status": "end_of_chain"}
+    trace_id = format(current_span.get_span_context().trace_id, "032x")
+
+    downstream_response = None
+
     if NEXT_SERVICE_URL:
         try:
-            response = requests.get(NEXT_SERVICE_URL, timeout=3)
-            res_data = response.json()
+            # High timeout for Docker overhead
+            resp = requests.get(NEXT_SERVICE_URL, timeout=40) 
+            downstream_response = resp.json()
         except Exception as e:
-            res_data = {"error": f"Downstream service unavailable: {str(e)}"}
+            downstream_response = {"error": str(e)}
 
     latency = round((time.time() - start_time) * 1000, 2)
     
-    # --- WRITE LOG DIRECTLY TO FILE ---
-    write_failsafe_log(t_id, latency)
-    
-    return jsonify({"service": SERVICE_NAME, "trace_id": t_id, "next": res_data})
+    # COMMENT THIS OUT TO PREVENT CRASHES AND SPEED UP
+    # write_failsafe_log(trace_id, latency) 
 
+    return jsonify({
+        "service": SERVICE_NAME,
+        "trace_id": trace_id,
+        "latency_ms": latency,
+        "next_service_response": downstream_response
+    })
+
+
+# -------------------------------------------------------------------
+# 5. ENTRY POINT
+# -------------------------------------------------------------------
 if __name__ == "__main__":
-    print(f"--- {SERVICE_NAME} starting on port {PORT} ---")
-    app.run(host="127.0.0.1", port=PORT, threaded=True)
+    # 0.0.0.0 tells Flask to listen for requests coming from outside the container
+    app.run(host="0.0.0.0", port=PORT, threaded=True)
